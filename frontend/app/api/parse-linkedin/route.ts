@@ -4,7 +4,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
 
-    const response = await fetch("http://localhost:5000/api/parse-linkedin", {
+    const response = await fetch("http://127.0.0.1:5000/api/parse-linkedin", {
       method: "POST",
       body: formData,
     });
