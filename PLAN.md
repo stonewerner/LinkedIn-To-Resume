@@ -1,3 +1,4 @@
+pip install --only-binary :all: PyMuPDF
 Here's the chronological plan for what needs to be done next:
 
 1. Complete the LinkedIn Parser

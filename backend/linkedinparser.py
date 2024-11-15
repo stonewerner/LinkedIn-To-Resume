@@ -6,6 +6,12 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from openai import OpenAI
+from pinecone import Pinecone
+import os
+from dotenv import load_dotenv
+import uuid
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(
@@ -13,6 +19,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 @dataclass
 class DateRange:
@@ -261,10 +270,128 @@ class LinkedInPDFParser:
             logger.error(f"Error parsing PDF: {e}")
             raise
 
-def parse_linkedin_pdf(pdf_path: str) -> Dict:
-    """Convenience function to parse LinkedIn PDF."""
-    parser = LinkedInPDFParser(pdf_path)
-    return parser.parse()
+def profile_to_text(profile: Dict) -> str:
+    """Convert profile sections to a single text for embedding"""
+    text_parts = []
+    
+    # Add contact info
+    if "contact" in profile:
+        contact = profile["contact"]
+        text_parts.append(f"Name: {contact.get('name', '')}")
+        text_parts.append(f"Location: {contact.get('location', '')}")
+    
+    # Add summary
+    if "summary" in profile:
+        text_parts.append(f"Summary: {profile['summary']}")
+    
+    # Add experience
+    if "experience" in profile:
+        text_parts.append("Experience:")
+        for exp in profile["experience"]:
+            text_parts.append(
+                f"{exp['title']} at {exp['company']} "
+                f"({exp['dates']['start']} - {exp['dates']['end']})\n"
+                f"{exp.get('description', '')}"
+            )
+    
+    # Add education
+    if "education" in profile:
+        text_parts.append("Education:")
+        for edu in profile["education"]:
+            text_parts.append(
+                f"{edu['degree']} in {edu['field']} from {edu['school']} "
+                f"({edu['dates']['start']} - {edu['dates']['end']})"
+            )
+    
+    # Add skills
+    if "skills" in profile:
+        text_parts.append(f"Skills: {', '.join(profile['skills'])}")
+    
+    # Add certifications
+    if "certifications" in profile:
+        text_parts.append("Certifications:")
+        for cert in profile["certifications"]:
+            text_parts.append(
+                f"{cert['name']} from {cert['issuer']} "
+                f"(Issued: {cert['date']}, Expires: {cert.get('expires', 'N/A')})"
+            )
+    
+    return "\n\n".join(text_parts)
+
+def store_profile_in_vector_db(profile: Dict) -> bool:
+    """Store parsed profile in vector database"""
+    try:
+        # Validate profile has required fields
+        if not profile.get("contact"):
+            raise ValueError("Profile missing contact information")
+            
+        # Generate a unique ID (either use name or create a fallback)
+        profile_id = (
+            profile["contact"].get("name") or 
+            profile["contact"].get("email") or 
+            f"profile_{uuid.uuid4()}"  # Fallback to random UUID
+        ).strip()
+        
+        if not profile_id:
+            raise ValueError("Could not generate valid profile ID")
+            
+        # Initialize OpenAI and Pinecone clients
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index('linkedin-profiles')
+        
+        # Convert profile to text format
+        text = profile_to_text(profile)
+        
+        # Generate embedding
+        response = client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small",
+        )
+        embedding = response.data[0].embedding
+        
+        # Create vector record
+        vector = {
+            "values": embedding,
+            "id": profile_id,  # Use validated ID
+            "metadata": {
+                "profile": json.dumps(profile),
+                "text": text,
+                "timestamp": datetime.utcnow().isoformat()  # Add timestamp for tracking
+            }
+        }
+        
+        # Upload to Pinecone
+        result = index.upsert(
+            vectors=[vector],
+            namespace="profiles"
+        )
+        
+        logger.info(f"Profile stored in vector database with ID: {profile_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error storing profile in vector database: {e}")
+        return False
+
+def parse_linkedin_pdf(pdf_path: str, store_in_db: bool = True) -> Dict:
+    """Parse LinkedIn PDF and optionally store in vector database."""
+    try:
+        # Parse PDF
+        parser = LinkedInPDFParser(pdf_path)
+        profile_data = parser.parse()
+        
+        # Store in vector database if requested
+        if store_in_db:
+            store_success = store_profile_in_vector_db(profile_data)
+            if not store_success:
+                logger.warning("Failed to store profile in vector database")
+        
+        return profile_data
+        
+    except Exception as e:
+        logger.error(f"Failed to parse LinkedIn PDF: {e}")
+        raise
 
 # Example usage
 if __name__ == "__main__":
