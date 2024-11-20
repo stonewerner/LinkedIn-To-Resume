@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from openai import OpenAI
@@ -318,22 +318,12 @@ def profile_to_text(profile: Dict) -> str:
     
     return "\n\n".join(text_parts)
 
-def store_profile_in_vector_db(profile: Dict) -> bool:
+def store_profile_in_vector_db(profile: Dict, profile_id: str) -> bool:
     """Store parsed profile in vector database"""
     try:
         # Validate profile has required fields
         if not profile.get("contact"):
             raise ValueError("Profile missing contact information")
-            
-        # Generate a unique ID (either use name or create a fallback)
-        profile_id = (
-            profile["contact"].get("name") or 
-            profile["contact"].get("email") or 
-            f"profile_{uuid.uuid4()}"  # Fallback to random UUID
-        ).strip()
-        
-        if not profile_id:
-            raise ValueError("Could not generate valid profile ID")
             
         # Initialize OpenAI and Pinecone clients
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -374,20 +364,117 @@ def store_profile_in_vector_db(profile: Dict) -> bool:
         logger.error(f"Error storing profile in vector database: {e}")
         return False
 
-def parse_linkedin_pdf(pdf_path: str, store_in_db: bool = True) -> Dict:
-    """Parse LinkedIn PDF and optionally store in vector database."""
+def retrieve_profile(profile_id: str) -> Optional[Dict]:
+    """Retrieve a specific profile by ID."""
+    try:
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index('linkedin-profiles')
+        
+        result = index.fetch(
+            ids=[profile_id],
+            namespace="profiles"
+        )
+        
+        if not result.vectors:
+            logger.warning(f"No profile found with ID: {profile_id}")
+            return None
+            
+        # Parse stored JSON back to dict
+        profile_data = json.loads(result.vectors[profile_id].metadata['profile'])
+        return profile_data
+        
+    except Exception as e:
+        logger.error(f"Error retrieving profile: {e}")
+        return None
+
+def find_similar_profiles(profile_id: str, top_k: int = 5) -> List[Dict]:
+    """Find similar profiles to a given profile."""
+    try:
+        pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        index = pc.Index('linkedin-profiles')
+        
+        # First get the vector for our target profile
+        result = index.fetch(
+            ids=[profile_id],
+            namespace="profiles"
+        )
+        
+        if not result.vectors:
+            raise ValueError(f"No profile found with ID: {profile_id}")
+            
+        # Use the vector to find similar profiles
+        query_response = index.query(
+            vector=result.vectors[profile_id].values,
+            top_k=top_k,
+            namespace="profiles",
+            include_metadata=True
+        )
+        
+        # Convert results to list of profiles
+        similar_profiles = []
+        for match in query_response.matches:
+            profile_data = json.loads(match.metadata['profile'])
+            similar_profiles.append({
+                'profile': profile_data,
+                'score': match.score
+            })
+            
+        return similar_profiles
+        
+    except Exception as e:
+        logger.error(f"Error finding similar profiles: {e}")
+        return []
+
+def generate_resume(profile_id: str) -> Optional[Dict]:
+    """Generate a resume for a given profile."""
+    try:
+        # 1. Retrieve the profile
+        profile = retrieve_profile(profile_id)
+        if not profile:
+            raise ValueError(f"Profile not found: {profile_id}")
+            
+        # 2. Find similar profiles for reference
+        similar_profiles = find_similar_profiles(profile_id, top_k=3)
+        
+        # 3. Prepare context for AI
+        context = {
+            'target_profile': profile,
+            'similar_profiles': similar_profiles,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        
+        # 4. Generate resume content (placeholder for AI integration)
+        # TODO: Integrate with your chosen AI model (e.g., Groq)
+        resume_content = {
+            'profile_id': profile_id,
+            'context': context,
+            # Add generated content here
+        }
+        
+        return resume_content
+        
+    except Exception as e:
+        logger.error(f"Error generating resume: {e}")
+        return None
+
+# Update parse_linkedin_pdf to return the profile ID
+def parse_linkedin_pdf(pdf_path: str, store_in_db: bool = True) -> Tuple[str, Dict]:
+    """Parse LinkedIn PDF and optionally store in vector database.
+    Returns tuple of (profile_id, profile_data)"""
     try:
         # Parse PDF
         parser = LinkedInPDFParser(pdf_path)
         profile_data = parser.parse()
+        profile_id = None
         
         # Store in vector database if requested
         if store_in_db:
-            store_success = store_profile_in_vector_db(profile_data)
+            profile_id = f"profile_{uuid.uuid4()}"
+            store_success = store_profile_in_vector_db(profile_data, profile_id)
             if not store_success:
                 logger.warning("Failed to store profile in vector database")
         
-        return profile_data
+        return profile_id, profile_data
         
     except Exception as e:
         logger.error(f"Failed to parse LinkedIn PDF: {e}")

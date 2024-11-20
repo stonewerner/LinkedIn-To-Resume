@@ -7,6 +7,10 @@ right now we upload each pdf to pinecone with an id of EITHER their name or a uu
 -> need to make that consistent so we know how to query it when trying to create resume
 
 next: use RAG to create LaTeX resume
+show isUploading and isLoading
+then when done show a button to download the resume
+
+- latex renderer plugin?
 
 Here's the chronological plan for what needs to be done next:
 

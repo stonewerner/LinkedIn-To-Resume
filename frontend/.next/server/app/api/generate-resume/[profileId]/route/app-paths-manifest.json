@@ -1,0 +1,3 @@
+{
+  "/api/generate-resume/[profileId]/route": "app/api/generate-resume/[profileId]/route.js"
+}

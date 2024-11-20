@@ -1,5 +1,6 @@
 {
   "/page": "app/page.js",
   "/favicon.ico/route": "app/favicon.ico/route.js",
-  "/api/parse-linkedin/route": "app/api/parse-linkedin/route.js"
+  "/api/parse-linkedin/route": "app/api/parse-linkedin/route.js",
+  "/api/generate-resume/[profileId]/route": "app/api/generate-resume/[profileId]/route.js"
 }
