@@ -78,3 +78,9 @@ Add multiple LaTeX templates
 Allow manual editing of parsed content
 Add a preview of the generated PDF
 Add the ability to save/load previous generations
+
+==================
+deployment:
+
+conda list --export > requirements.txt
+^ need to put all requirements in the requirements.txt file for heroku

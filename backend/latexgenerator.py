@@ -164,6 +164,7 @@ class ResumeGenerator:
                 self._add_summary()
                 self._add_experience()
                 self.doc.append(NoEscape(r'\end{minipage}'))
+            # TODO: send this to an LLM using a groq api key to make a real good latex resume
             
             # Generate PDF
             self.doc.generate_pdf(output_path, clean_tex=False)
